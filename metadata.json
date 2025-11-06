@@ -1,0 +1,5 @@
+{
+  "name": "Universal AI Cost Analyzer",
+  "description": "An application to help users analyze invoices and offers to identify savings opportunities. Upload or paste a document, and the AI will extract items, find market prices using Google Search, and provide a structured analysis with recommendations.",
+  "requestFramePermissions": []
+}
