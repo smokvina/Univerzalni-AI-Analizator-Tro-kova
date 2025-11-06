@@ -45,11 +45,36 @@ declare var jspdf: any;
               </div>
             }
           </div>
+          
+          <div class="relative">
+            <div class="absolute inset-0 flex items-center" aria-hidden="true">
+              <div class="w-full border-t border-gray-300"></div>
+            </div>
+            <div class="relative flex justify-center">
+              <span class="bg-white px-3 text-base font-medium text-gray-500">ILI</span>
+            </div>
+          </div>
+
+          <div>
+            <label for="text-input" class="block text-sm font-medium leading-6 text-gray-900">
+              Zalijepite tekstualni sadržaj
+            </label>
+            <div class="mt-2">
+              <textarea 
+                id="text-input"
+                rows="8" 
+                class="block w-full rounded-md border-0 p-2.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6" 
+                placeholder="Unesite ili zalijepite tekst računa ili ponude ovdje..."
+                [value]="textInput()"
+                (input)="onTextInputChange($event)"></textarea>
+            </div>
+          </div>
+
 
           <div>
             <button
               (click)="analyze()"
-              [disabled]="!selectedFile() || loading() || exportingPdf()"
+              [disabled]="(!selectedFile() && !textInput().trim()) || loading() || exportingPdf()"
               class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-300">
               @if (loading()) {
                 <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -130,6 +155,7 @@ export class AppComponent {
   sources = signal<any[] | null>(null);
   error = signal<string | null>(null);
   selectedFile = signal<File | null>(null);
+  textInput = signal<string>('');
   isDragOver = signal(false);
 
   analysisHtml = computed(() => {
@@ -141,6 +167,15 @@ export class AppComponent {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files[0]) {
       this.selectedFile.set(input.files[0]);
+      this.textInput.set(''); // Clear text input
+    }
+  }
+
+  onTextInputChange(event: Event): void {
+    const target = event.target as HTMLTextAreaElement;
+    this.textInput.set(target.value);
+    if (target.value) {
+      this.selectedFile.set(null); // Clear file input
     }
   }
   
@@ -158,13 +193,16 @@ export class AppComponent {
     this.isDragOver.set(false);
     if (event.dataTransfer?.files[0]) {
       this.selectedFile.set(event.dataTransfer.files[0]);
+      this.textInput.set(''); // Clear text input
     }
   }
 
   analyze(): void {
     const file = this.selectedFile();
-    if (!file) {
-      this.error.set('Molimo odaberite datoteku za analizu.');
+    const text = this.textInput().trim();
+
+    if (!file && !text) {
+      this.error.set('Molimo odaberite datoteku ili unesite tekst za analizu.');
       return;
     }
 
@@ -173,36 +211,52 @@ export class AppComponent {
     this.sources.set(null);
     this.error.set(null);
 
-    const reader = new FileReader();
-    reader.onload = async (e: any) => {
-      const fileDataUrl = e.target.result as string;
-      try {
-        const mimeTypeMatch = fileDataUrl.match(/data:(.+);base64,/);
-        if (!mimeTypeMatch || !mimeTypeMatch[1]) {
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = async (e: any) => {
+        const fileDataUrl = e.target.result as string;
+        try {
+          const mimeTypeMatch = fileDataUrl.match(/data:(.+);base64,/);
+          if (!mimeTypeMatch || !mimeTypeMatch[1]) {
             this.error.set('Nije moguće odrediti vrstu datoteke.');
             this.loading.set(false);
             return;
-        }
-        const mimeType = mimeTypeMatch[1];
-        const base64Data = fileDataUrl.split(',')[1];
-        
-        const result = await this.geminiService.generateAnalysis({ 
+          }
+          const mimeType = mimeTypeMatch[1];
+          const base64Data = fileDataUrl.split(',')[1];
+          
+          const result = await this.geminiService.generateAnalysis({ 
             file: { mimeType, data: base64Data } 
-        });
+          });
 
-        this.analysis.set(result.analysisText);
-        this.sources.set(result.sources);
-      } catch (err: any) {
-        this.error.set(err.message || 'Došlo je do nepoznate greške.');
-      } finally {
-        this.loading.set(false);
-      }
-    };
-    reader.onerror = () => {
+          this.analysis.set(result.analysisText);
+          this.sources.set(result.sources);
+        } catch (err: any) {
+          this.error.set(err.message || 'Došlo je do nepoznate greške.');
+        } finally {
+          this.loading.set(false);
+        }
+      };
+      reader.onerror = () => {
         this.error.set('Nije moguće pročitati datoteku.');
         this.loading.set(false);
-    };
-    reader.readAsDataURL(file);
+      };
+      reader.readAsDataURL(file);
+    } else if (text) {
+      (async () => {
+        try {
+          const result = await this.geminiService.generateAnalysis({
+            textData: text,
+          });
+          this.analysis.set(result.analysisText);
+          this.sources.set(result.sources);
+        } catch (err: any) {
+          this.error.set(err.message || 'Došlo je do nepoznate greške.');
+        } finally {
+          this.loading.set(false);
+        }
+      })();
+    }
   }
 
   exportAsPDF(): void {
@@ -221,32 +275,37 @@ export class AppComponent {
       scale: 2, // Higher scale for better quality
       useCORS: true,
       windowWidth: data.scrollWidth,
-      windowHeight: data.scrollHeight
+      windowHeight: data.scrollHeight,
     }).then((canvas: HTMLCanvasElement) => {
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jspdf.jsPDF({
-        orientation: 'p', // portrait
+        orientation: 'p',
         unit: 'mm',
         format: 'a4',
       });
 
+      const margin = 15; // 15mm margin on each side
       const pdfPageWidth = pdf.internal.pageSize.getWidth();
       const pdfPageHeight = pdf.internal.pageSize.getHeight();
+      const usableWidth = pdfPageWidth - margin * 2;
+      const usableHeight = pdfPageHeight - margin * 2;
 
       const imgProps = pdf.getImageProperties(imgData);
-      const pdfImgHeight = (imgProps.height * pdfPageWidth) / imgProps.width;
+      const pdfImgHeight = (imgProps.height * usableWidth) / imgProps.width;
       
       let heightLeft = pdfImgHeight;
       let position = 0;
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfPageWidth, pdfImgHeight);
-      heightLeft -= pdfPageHeight;
+      // Add the first page
+      pdf.addImage(imgData, 'PNG', margin, margin, usableWidth, pdfImgHeight);
+      heightLeft -= usableHeight;
 
+      // Add subsequent pages if needed
       while (heightLeft > 0) {
-        position -= pdfPageHeight;
+        position -= usableHeight;
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfPageWidth, pdfImgHeight);
-        heightLeft -= pdfPageHeight;
+        pdf.addImage(imgData, 'PNG', margin, position + margin, usableWidth, pdfImgHeight);
+        heightLeft -= usableHeight;
       }
 
       pdf.save(fileName);

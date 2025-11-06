@@ -47,7 +47,9 @@ export class GeminiService {
         text: 'Analiziraj priloženi dokument koji je račun ili komercijalna ponuda.',
       });
     } else if (input.textData) {
-      userMessageParts.push({ text: input.textData });
+      userMessageParts.push({
+        text: `Analiziraj sljedeći tekstualni sadržaj koji predstavlja račun ili komercijalnu ponudu:\n\n${input.textData}`,
+      });
     }
 
     const systemInstruction = `
