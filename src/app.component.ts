@@ -33,11 +33,11 @@ declare var jspdf: any;
             <p class="mt-2 text-sm text-gray-600">
               <label for="file-upload" class="relative cursor-pointer rounded-md font-semibold text-blue-600 hover:text-blue-500">
                 <span>Učitajte dokument</span>
-                <input id="file-upload" name="file-upload" type="file" class="sr-only" (change)="onFileSelected($event)" accept="image/png, image/jpeg, image/gif, application/pdf, image/heic, image/heif">
+                <input id="file-upload" name="file-upload" type="file" class="sr-only" (change)="onFileSelected($event)" accept="image/png, image/jpeg, image/gif, application/pdf, image/heic, image/heif, .txt, .csv, text/plain, text/csv">
               </label>
               ili ga povucite i ispustite
             </p>
-            <p class="text-xs text-gray-500">PNG, JPG, GIF, PDF, HEIC</p>
+            <p class="text-xs text-gray-500">PNG, JPG, PDF, HEIC, TXT, CSV</p>
 
             @if (selectedFile()) {
               <div class="mt-4 text-sm font-medium text-gray-700">
@@ -219,8 +219,9 @@ export class AppComponent {
   }
 
   private processFile(file: File): void {
+    // Reset state
     this.selectedFile.set(file);
-    this.textInput.set(''); // Clear text input
+    this.textInput.set(''); 
     this.uploadProgress.set(0);
     this.uploadSuccess.set(false);
     this.selectedFileDataUrl.set(null);
@@ -229,6 +230,19 @@ export class AppComponent {
     this.error.set(null);
 
     const reader = new FileReader();
+
+    const fileType = file.type;
+    const fileName = file.name.toLowerCase();
+
+    const isImageOrPdf = fileType.startsWith('image/') || fileType === 'application/pdf';
+    const isTextBased = fileType === 'text/plain' || fileType === 'text/csv' || fileName.endsWith('.txt') || fileName.endsWith('.csv');
+
+    reader.onerror = () => {
+      this.error.set('Nije moguće pročitati datoteku.');
+      this.uploadProgress.set(null);
+      this.uploadSuccess.set(false);
+      this.selectedFile.set(null);
+    };
     
     reader.onprogress = (event: ProgressEvent) => {
       if (event.lengthComputable) {
@@ -237,21 +251,27 @@ export class AppComponent {
       }
     };
 
-    reader.onload = (e: any) => {
-      this.uploadProgress.set(100);
-      this.uploadSuccess.set(true);
-      this.selectedFileDataUrl.set(e.target.result as string);
-    };
-
-    reader.onerror = () => {
-      this.error.set('Nije moguće pročitati datoteku.');
-      this.uploadProgress.set(null);
-      this.uploadSuccess.set(false);
+    if (isImageOrPdf) {
+      reader.onload = (e: any) => {
+        this.uploadProgress.set(100);
+        this.uploadSuccess.set(true);
+        this.selectedFileDataUrl.set(e.target.result as string);
+      };
+      reader.readAsDataURL(file);
+    } else if (isTextBased) {
+      reader.onload = (e: any) => {
+        this.uploadProgress.set(100);
+        this.uploadSuccess.set(true);
+        this.textInput.set(e.target.result as string);
+        this.selectedFileDataUrl.set(null); // Make sure it uses text path for analysis
+      };
+      reader.readAsText(file);
+    } else {
+      // For unsupported types like Word, Excel, etc.
+      this.error.set('Format datoteke nije podržan za izravnu analizu. Molimo koristite slike, PDF, TXT, CSV ili ručno kopirajte sadržaj.');
       this.selectedFile.set(null);
-      this.selectedFileDataUrl.set(null);
-    };
-
-    reader.readAsDataURL(file);
+      this.uploadProgress.set(null);
+    }
   }
 
   analyze(): void {
@@ -362,86 +382,121 @@ export class AppComponent {
     return text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
   }
 
-  private getRatingBadge(ratingText: string): string {
-    const cleanRating = ratingText.replace(/\*/g, '');
-    let badgeClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium';
+  private getRatingInfo(ratingText: string): { text: string; className: string; iconSvg: string; borderColor: string; } {
+    const cleanRating = ratingText.replace(/\*/g, '').trim();
     
+    // Default values
+    let info = {
+      text: this.formatText(ratingText),
+      className: 'bg-gray-100 text-gray-800',
+      iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9.043c.337-1.12 1.43-2.043 2.772-2.043s2.435.923 2.772 2.043m-5.544 0a8.955 8.955 0 00-2.062 0M17.3 9.043a8.955 8.955 0 01-2.062 0m0 0a2.5 2.5 0 11-5.544 0m5.544 0h.01" /></svg>`,
+      borderColor: 'border-gray-400'
+    };
+  
     if (cleanRating.includes('Visoka')) {
-      badgeClass += ' bg-red-100 text-red-800';
+      info.className = 'bg-red-100 text-red-800';
+      info.iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`;
+      info.borderColor = 'border-red-500';
     } else if (cleanRating.includes('Poštena')) {
-      badgeClass += ' bg-yellow-100 text-yellow-800';
+      info.className = 'bg-yellow-100 text-yellow-800';
+      info.iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>`;
+      info.borderColor = 'border-yellow-500';
     } else if (cleanRating.includes('Dobra')) {
-      badgeClass += ' bg-green-100 text-green-800';
-    } else {
-      return this.formatText(ratingText);
+      info.className = 'bg-green-100 text-green-800';
+      info.iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+      info.borderColor = 'border-green-500';
     }
-
-    return `<span class="${badgeClass}">${this.formatText(ratingText)}</span>`;
+    
+    info.text = this.formatText(ratingText);
+    return info;
   }
 
   private markdownToHtml(markdown: string): string {
     let html = '';
-    const lines = markdown.split('\n');
-    let inTableBody = false;
+    const lines = markdown.split('\n').filter(line => line.trim() !== '');
+
+    let inItemsList = false;
+    let inSummary = false;
 
     for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine) continue;
+        const trimmedLine = line.trim();
 
-      if (trimmedLine.startsWith('|')) {
-        const cells = trimmedLine.split('|').map(c => c.trim()).slice(1, -1);
-        if (cells.length === 0) continue;
-
-        if (trimmedLine.includes(':---')) {
-          html += '<tbody class="bg-white divide-y divide-gray-200">';
-          inTableBody = true;
-        } else if (inTableBody) {
-          const ratingText = cells[3] || '';
-          const isGoodRating = ratingText.includes('Dobra');
-          const rowClass = isGoodRating ? 'line-through text-gray-500' : 'text-black';
-
-          html += `<tr class="${rowClass}">`;
-          html += `<td class="px-4 py-4 whitespace-nowrap text-sm">${this.formatText(cells[0])}</td>`;
-          html += `<td class="px-4 py-4 whitespace-nowrap text-sm text-center">${this.formatText(cells[1])}</td>`;
-          html += `<td class="px-4 py-4 whitespace-nowrap text-sm text-center">${this.formatText(cells[2])}</td>`;
-          html += `<td class="px-4 py-4 whitespace-nowrap text-sm text-center">${this.getRatingBadge(ratingText)}</td>`;
-          html += `<td class="px-4 py-4 text-sm">${this.formatText(cells[4] || '')}</td>`;
-          html += '</tr>';
-        } else {
-          html += '<div class="overflow-x-auto rounded-lg border border-gray-200 mt-4"><table class="min-w-full divide-y divide-gray-200">';
-          html += '<thead class="bg-gray-50"><tr>';
-          cells.forEach(header => {
-            html += `<th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${header}</th>`;
-          });
-          html += '</tr></thead>';
+        if (!trimmedLine.startsWith('|') && inItemsList) {
+            html += '</div>'; // Close item grid
+            inItemsList = false;
         }
-      } else {
-        if (inTableBody) {
-          html += '</tbody></table></div>';
-          inTableBody = false;
+        if ((trimmedLine.startsWith('###') || trimmedLine.startsWith('---')) && inSummary) {
+            html += '</div></div>'; // Close summary content and container
+            inSummary = false;
         }
-
+        
         if (trimmedLine.startsWith('# Analiza Dokumenta:')) {
-          const title = trimmedLine.replace('# Analiza Dokumenta:', '').trim();
-          html += `<h2 class="text-2xl font-semibold text-gray-800 mb-4">Analiza Dokumenta: <span class="font-bold">${title}</span></h2>`;
-        } else if (trimmedLine.startsWith('### ')) {
-          html += `<h3 class="text-xl font-semibold text-gray-700 mt-6 mb-3">${trimmedLine.substring(4)}</h3>`;
+            const title = trimmedLine.replace('# Analiza Dokumenta:', '').trim();
+            html += `<h2 class="text-2xl font-semibold text-gray-800 mb-4">Analiza Dokumenta: <span class="font-bold text-blue-600">${title}</span></h2>`;
+        } else if (trimmedLine.startsWith('### Sažetak Analize')) {
+            inSummary = true;
+            html += `<div class="p-6 bg-gray-50 rounded-lg"><h3 class="text-xl font-semibold text-gray-700 mb-4">${trimmedLine.substring(4)}</h3><div class="space-y-2">`;
+        } else if (trimmedLine.startsWith('### Detaljna Analiza Stavki')) {
+            html += `<h3 class="text-xl font-semibold text-gray-700 mt-8 mb-4">${trimmedLine.substring(4)}</h3>`;
+        } else if (trimmedLine.startsWith('### Završne Preporuke')) {
+            html += `<h3 class="text-xl font-semibold text-gray-700 mt-8 mb-4">${trimmedLine.substring(4)}</h3>`;
         } else if (trimmedLine.startsWith('---')) {
-          html += '<hr class="my-6 border-gray-200">';
+            // Separator is handled by div logic
         } else if (trimmedLine.startsWith('* **')) {
-          const boldPart = trimmedLine.match(/\*\s\*\*(.*?):\*\*/);
-          if (boldPart) {
-            const content = trimmedLine.substring(boldPart[0].length).trim();
-            html += `<p class="text-gray-600"><strong class="font-medium text-gray-900">${boldPart[1]}:</strong> ${content}</p>`;
-          }
+            const boldPart = trimmedLine.match(/\*\s\*\*(.*?):\*\*/);
+            if (boldPart) {
+                const content = trimmedLine.substring(boldPart[0].length).trim();
+                html += `<p class="text-gray-700"><strong class="font-medium text-gray-900">${boldPart[1]}:</strong> ${this.formatText(content)}</p>`;
+            }
+        } else if (trimmedLine.startsWith('|')) {
+            const cells = trimmedLine.split('|').map(c => c.trim()).slice(1, -1);
+            if (cells.length === 0) continue;
+
+            if (trimmedLine.includes(':---') && !inItemsList) {
+                inItemsList = true;
+                html += '<div class="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2">';
+            } else if (inItemsList) {
+                const [itemName, docPrice, marketPrice, ratingText, comment] = cells;
+                const ratingInfo = this.getRatingInfo(ratingText || '');
+                const isGoodPrice = (ratingText || '').includes('Dobra');
+
+                html += `
+                  <div class="flex flex-col rounded-xl border bg-white shadow-sm transition-all hover:shadow-lg ${ratingInfo.borderColor} border-l-4">
+                    <div class="p-5 flex-grow">
+                      <h4 class="text-lg font-semibold ${isGoodPrice ? 'text-gray-400 line-through' : 'text-gray-800'}">${this.formatText(itemName)}</h4>
+                      
+                      <div class="mt-4 space-y-2 text-sm">
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-500">Ponuđena cijena:</span>
+                          <span class="font-medium text-lg ${isGoodPrice ? 'text-gray-400' : 'text-gray-900'}">${this.formatText(docPrice)}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-500">Tržišni prosjek:</span>
+                          <span class="font-medium text-lg text-gray-900">${this.formatText(marketPrice)}</span>
+                        </div>
+                      </div>
+                      
+                      ${comment ? `<p class="mt-4 text-sm text-gray-600 border-t pt-3">${this.formatText(comment)}</p>` : ''}
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded-b-xl mt-auto">
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${ratingInfo.className}">
+                          ${ratingInfo.iconSvg}
+                          ${ratingInfo.text}
+                        </span>
+                    </div>
+                  </div>
+                `;
+            }
         } else {
-          html += `<p class="text-gray-600 mt-4">${this.formatText(trimmedLine)}</p>`;
+            html += `<p class="text-gray-600 leading-relaxed">${this.formatText(trimmedLine)}</p>`;
         }
-      }
     }
 
-    if (inTableBody) {
-      html += '</tbody></table></div>';
+    if (inItemsList) {
+        html += '</div>';
+    }
+    if (inSummary) {
+        html += '</div></div>';
     }
 
     return html;
