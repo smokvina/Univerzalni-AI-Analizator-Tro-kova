@@ -33,15 +33,32 @@ declare var jspdf: any;
             <p class="mt-2 text-sm text-gray-600">
               <label for="file-upload" class="relative cursor-pointer rounded-md font-semibold text-blue-600 hover:text-blue-500">
                 <span>Učitajte dokument</span>
-                <input id="file-upload" name="file-upload" type="file" class="sr-only" (change)="onFileSelected($event)" accept="image/png, image/jpeg, image/gif, application/pdf">
+                <input id="file-upload" name="file-upload" type="file" class="sr-only" (change)="onFileSelected($event)" accept="image/png, image/jpeg, image/gif, application/pdf, image/heic, image/heif">
               </label>
               ili ga povucite i ispustite
             </p>
-            <p class="text-xs text-gray-500">PNG, JPG, GIF, PDF</p>
+            <p class="text-xs text-gray-500">PNG, JPG, GIF, PDF, HEIC</p>
 
             @if (selectedFile()) {
-              <div class="mt-4 text-sm font-medium text-gray-700 bg-gray-100 p-2 rounded-md">
-                Odabrana datoteka: {{ selectedFile()?.name }}
+              <div class="mt-4 text-sm font-medium text-gray-700">
+                <div class="bg-gray-100 p-3 rounded-lg space-y-2">
+                  <p class="truncate">Odabrana datoteka: <span class="font-semibold">{{ selectedFile()?.name }}</span></p>
+                  
+                  @if (uploadProgress() !== null && !uploadSuccess()) {
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                      <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-in-out" [style.width.%]="uploadProgress()"></div>
+                    </div>
+                  }
+                  
+                  @if (uploadSuccess()) {
+                    <div class="flex items-center text-green-600">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1.5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                      </svg>
+                      <span class="text-sm font-medium">Datoteka spremna za analizu.</span>
+                    </div>
+                  }
+                </div>
               </div>
             }
           </div>
@@ -74,7 +91,7 @@ declare var jspdf: any;
           <div>
             <button
               (click)="analyze()"
-              [disabled]="(!selectedFile() && !textInput().trim()) || loading() || exportingPdf()"
+              [disabled]="(!selectedFileDataUrl() && !textInput().trim()) || loading() || exportingPdf()"
               class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-300">
               @if (loading()) {
                 <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -157,6 +174,9 @@ export class AppComponent {
   selectedFile = signal<File | null>(null);
   textInput = signal<string>('');
   isDragOver = signal(false);
+  uploadProgress = signal<number | null>(null);
+  uploadSuccess = signal<boolean>(false);
+  selectedFileDataUrl = signal<string | null>(null);
 
   analysisHtml = computed(() => {
     const markdown = this.analysis();
@@ -166,8 +186,7 @@ export class AppComponent {
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files[0]) {
-      this.selectedFile.set(input.files[0]);
-      this.textInput.set(''); // Clear text input
+      this.processFile(input.files[0]);
     }
   }
 
@@ -176,6 +195,9 @@ export class AppComponent {
     this.textInput.set(target.value);
     if (target.value) {
       this.selectedFile.set(null); // Clear file input
+      this.selectedFileDataUrl.set(null);
+      this.uploadProgress.set(null);
+      this.uploadSuccess.set(false);
     }
   }
   
@@ -192,16 +214,51 @@ export class AppComponent {
     event.preventDefault();
     this.isDragOver.set(false);
     if (event.dataTransfer?.files[0]) {
-      this.selectedFile.set(event.dataTransfer.files[0]);
-      this.textInput.set(''); // Clear text input
+      this.processFile(event.dataTransfer.files[0]);
     }
   }
 
+  private processFile(file: File): void {
+    this.selectedFile.set(file);
+    this.textInput.set(''); // Clear text input
+    this.uploadProgress.set(0);
+    this.uploadSuccess.set(false);
+    this.selectedFileDataUrl.set(null);
+    this.analysis.set(null);
+    this.sources.set(null);
+    this.error.set(null);
+
+    const reader = new FileReader();
+    
+    reader.onprogress = (event: ProgressEvent) => {
+      if (event.lengthComputable) {
+        const progress = Math.round((event.loaded / event.total) * 100);
+        this.uploadProgress.set(progress);
+      }
+    };
+
+    reader.onload = (e: any) => {
+      this.uploadProgress.set(100);
+      this.uploadSuccess.set(true);
+      this.selectedFileDataUrl.set(e.target.result as string);
+    };
+
+    reader.onerror = () => {
+      this.error.set('Nije moguće pročitati datoteku.');
+      this.uploadProgress.set(null);
+      this.uploadSuccess.set(false);
+      this.selectedFile.set(null);
+      this.selectedFileDataUrl.set(null);
+    };
+
+    reader.readAsDataURL(file);
+  }
+
   analyze(): void {
-    const file = this.selectedFile();
+    const fileDataUrl = this.selectedFileDataUrl();
     const text = this.textInput().trim();
 
-    if (!file && !text) {
+    if (!fileDataUrl && !text) {
       this.error.set('Molimo odaberite datoteku ili unesite tekst za analizu.');
       return;
     }
@@ -211,52 +268,35 @@ export class AppComponent {
     this.sources.set(null);
     this.error.set(null);
 
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = async (e: any) => {
-        const fileDataUrl = e.target.result as string;
-        try {
+    (async () => {
+      try {
+        let result;
+        if (fileDataUrl) {
           const mimeTypeMatch = fileDataUrl.match(/data:(.+);base64,/);
           if (!mimeTypeMatch || !mimeTypeMatch[1]) {
-            this.error.set('Nije moguće odrediti vrstu datoteke.');
-            this.loading.set(false);
-            return;
+            throw new Error('Nije moguće odrediti vrstu datoteke.');
           }
           const mimeType = mimeTypeMatch[1];
           const base64Data = fileDataUrl.split(',')[1];
           
-          const result = await this.geminiService.generateAnalysis({ 
+          result = await this.geminiService.generateAnalysis({ 
             file: { mimeType, data: base64Data } 
           });
-
-          this.analysis.set(result.analysisText);
-          this.sources.set(result.sources);
-        } catch (err: any) {
-          this.error.set(err.message || 'Došlo je do nepoznate greške.');
-        } finally {
-          this.loading.set(false);
-        }
-      };
-      reader.onerror = () => {
-        this.error.set('Nije moguće pročitati datoteku.');
-        this.loading.set(false);
-      };
-      reader.readAsDataURL(file);
-    } else if (text) {
-      (async () => {
-        try {
-          const result = await this.geminiService.generateAnalysis({
+        } else { // text must be present
+          result = await this.geminiService.generateAnalysis({
             textData: text,
           });
-          this.analysis.set(result.analysisText);
-          this.sources.set(result.sources);
-        } catch (err: any) {
-          this.error.set(err.message || 'Došlo je do nepoznate greške.');
-        } finally {
-          this.loading.set(false);
         }
-      })();
-    }
+        
+        this.analysis.set(result.analysisText);
+        this.sources.set(result.sources);
+
+      } catch (err: any) {
+        this.error.set(err.message || 'Došlo je do nepoznate greške.');
+      } finally {
+        this.loading.set(false);
+      }
+    })();
   }
 
   exportAsPDF(): void {
